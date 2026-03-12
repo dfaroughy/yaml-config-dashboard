@@ -1,0 +1,46 @@
+{
+  "name": "yaml-config-dashboard",
+  "displayName": "YAML Config Dashboard",
+  "description": "Visual editor for YAML configuration files — browse, edit, and export config params without writing YAML by hand.",
+  "version": "0.1.0",
+  "publisher": "dfaroughy",
+  "license": "MIT",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Other", "Visualization"],
+  "keywords": ["yaml", "config", "editor", "machine learning", "visual", "experiment"],
+  "icon": "media/logo.png",
+  "galleryBanner": { "color": "#0d1117", "theme": "dark" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dfaroughy/yaml-config-dashboard"
+  },
+  "bugs": {
+    "url": "https://github.com/dfaroughy/yaml-config-dashboard/issues"
+  },
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "configDashboard.open",
+        "title": "YAML Config Dashboard: Open",
+        "icon": "$(dashboard)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "configDashboard.open",
+        "key": "ctrl+shift+y",
+        "mac": "cmd+shift+y"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "configDashboard.open",
+          "when": "explorerResourceIsFolder",
+          "group": "navigation"
+        }
+      ]
+    }
+  }
+}
