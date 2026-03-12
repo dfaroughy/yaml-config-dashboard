@@ -22,7 +22,7 @@
     "commands": [
       {
         "command": "configDashboard.open",
-        "title": "YAML Config Dashboard: Open",
+        "title": "YAML Config Dashboard",
         "icon": "$(dashboard)"
       }
     ],

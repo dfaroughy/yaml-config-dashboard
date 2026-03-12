@@ -33,6 +33,23 @@ function activate(context) {
         configDir = folders[0].fsPath;
       }
 
+      // ── Check folder contains YAML files ───────────────────
+      const hasYaml = (function scanDir(dir) {
+        let entries;
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return false; }
+        for (const entry of entries) {
+          if (entry.name.startsWith('.')) continue;
+          if (entry.isFile() && /\.ya?ml$/.test(entry.name)) return true;
+          if (entry.isDirectory() && scanDir(path.join(dir, entry.name))) return true;
+        }
+        return false;
+      })(configDir);
+
+      if (!hasYaml) {
+        vscode.window.showInformationMessage('Config Dashboard: No YAML files found in this folder.');
+        return;
+      }
+
       // ── Resource URIs ──────────────────────────────────────
       const nonce = crypto.randomBytes(16).toString('hex');
 

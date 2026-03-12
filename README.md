@@ -4,7 +4,7 @@
 
 It renders a tabbed, hierarchical form with type-aware controls for every parameter in your config files. Designed for ML experiment configs, but works with any YAML.
 
-![Config Dashboard screenshot](Screenshot.png)
+![Config Dashboard screenshot](https://raw.githubusercontent.com/dfaroughy/yaml-config-dashboard/main/Screenshot.png)
 
 ---
 

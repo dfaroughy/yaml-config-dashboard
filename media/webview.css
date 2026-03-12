@@ -329,7 +329,7 @@ nav#file-tabs::-webkit-scrollbar { display: none; }
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--text-2);
-  font-size: var(--font-size-base);
+  font-size: calc(var(--font-size-base) + 3px);
   cursor: pointer;
   transition: all var(--transition);
   white-space: nowrap;
