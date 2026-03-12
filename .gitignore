@@ -1,0 +1,5 @@
+node_modules/
+*.vsix
+*.map
+js-yaml.min.js
+.DS_Store
