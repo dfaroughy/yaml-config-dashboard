@@ -94,6 +94,7 @@ const state = {
   pathToFid: {},      // { JSON(path): fid } rebuilt on each renderEditor
   renderingFile: null, // set while renderNode runs, used by registerField
   _bgLoads: new Set(), // filenames being loaded just to populate pinned bar
+  _agentPending: null, // { prompt } — stored while waiting for all files to load
 };
 
 const SETTINGS_KEY = 'config-dashboard-settings';
@@ -423,16 +424,27 @@ window.addEventListener('message', event => {
       state.configs[msg.filename] = {
         original: deepClone(msg.parsed),
         current: deepClone(msg.parsed),
+        raw: msg.raw || '',
       };
       if (state._bgLoads.has(msg.filename)) {
         // Background load — just refresh pinned bar, keep active file as-is
         state._bgLoads.delete(msg.filename);
         renderPinnedBar();
+      } else if (state._agentPending && state._agentPending.awaiting.has(msg.filename)) {
+        // Agent preload — don't change the active view, just accumulate
+        state._agentPending.awaiting.delete(msg.filename);
+        updateAgentScope();
+        if (state._agentPending.awaiting.size === 0) {
+          const prompt = state._agentPending.prompt;
+          state._agentPending = null;
+          _executeAgentPrompt(prompt);
+        }
       } else {
         state.activeFile = msg.filename;
         renderTabs();
         renderEditor();
         updateButtons();
+        updateAgentScope();
       }
       break;
     }
@@ -453,6 +465,73 @@ window.addEventListener('message', event => {
     case 'exportJsonResult': {
       if (msg.success) toast('Exported ' + msg.jsonFilename, 'success');
       else toast('Export failed: ' + (msg.error || 'Unknown'), 'error');
+      break;
+    }
+    case 'agentResult': {
+      setAgentBusy(false);
+      if (msg.error) {
+        toast('Agent: ' + msg.error, 'error');
+        renderAgentResponse('Error: ' + msg.error, null);
+        break;
+      }
+      if (!msg.patches || !Array.isArray(msg.patches)) {
+        toast('Agent: unexpected response format', 'error');
+        break;
+      }
+      if (msg.patches.length === 0) {
+        renderAgentResponse(msg.summary || 'No changes needed.', []);
+        toast('Agent made no changes', 'info');
+        break;
+      }
+
+      let applied = 0, skipped = 0;
+      const diffs = [];
+      const affectedFiles = new Set();
+
+      for (let { file, path, value } of msg.patches) {
+        // Normalise path: LM sometimes returns dot-string instead of array
+        if (typeof path === 'string') {
+          path = path.split('.');
+        } else if (Array.isArray(path) && path.length === 1 && typeof path[0] === 'string' && path[0].includes('.')) {
+          path = path[0].split('.');
+        } else if (Array.isArray(path)) {
+          path = path.map(String);
+        }
+        if (!path || path.length === 0) { skipped++; continue; }
+        // Resolve which config to patch — fall back to activeFile if no file given
+        const targetFile = file || state.activeFile;
+        const config = state.configs[targetFile];
+        if (!config) { skipped++; continue; }
+        const existing = getNestedValue(config.current, path);
+        if (existing === undefined) { skipped++; continue; }
+        // Coerce type to match original
+        const orig = getNestedValue(config.original, path);
+        let coerced = value;
+        if (typeof orig === 'number' && typeof value !== 'number') {
+          const n = Number(value);
+          coerced = isNaN(n) ? value : n;
+        } else if (typeof orig === 'boolean' && typeof value !== 'boolean') {
+          coerced = String(value).toLowerCase() === 'true';
+        }
+        diffs.push({ file: targetFile, path, oldVal: existing, newVal: coerced });
+        setNestedValue(config.current, path, coerced);
+        affectedFiles.add(targetFile);
+        applied++;
+      }
+
+      if (applied === 0) {
+        toast(`Agent: no valid fields matched${skipped ? ` (${skipped} skipped)` : ''}`, 'error');
+        renderAgentResponse(msg.summary || 'No matching fields found.', []);
+      } else {
+        const skipNote = skipped ? `, ${skipped} skipped` : '';
+        toast(`Agent: ${applied} change${applied > 1 ? 's' : ''} across ${affectedFiles.size} file${affectedFiles.size > 1 ? 's' : ''}${skipNote}`, 'success');
+        const input = document.getElementById('agent-input');
+        if (input) input.value = '';
+        renderAgentResponse(msg.summary || `Applied ${applied} change${applied > 1 ? 's' : ''}.`, diffs);
+      }
+      renderEditor();
+      renderPinnedBar();
+      updateButtons();
       break;
     }
   }
@@ -486,6 +565,7 @@ function selectFile(filename) {
   renderTabs();
   renderEditor();
   updateButtons();
+  updateAgentScope();
 }
 
 // ── Tabs ───────────────────────────────────────────────────
@@ -945,6 +1025,110 @@ function buildPinSliderHtml(fData, pData, currentVal, origVal) {
     `</div>` +
     logToggle +
   `</div>`;
+}
+
+// ── Agent CLI ───────────────────────────────────────────────
+function buildFileSchema(obj, path) {
+  // Flatten an object into [{path, value, type}] for scalar leaf nodes only
+  const rows = [];
+  for (const [k, v] of Object.entries(obj)) {
+    const p = [...path, k];
+    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      rows.push(...buildFileSchema(v, p));
+    } else if (!Array.isArray(v)) {
+      rows.push({ path: p, value: v, type: typeof v });
+    }
+  }
+  return rows;
+}
+
+function buildAllSchemata() {
+  // Returns [{file, raw, fields:[{path,value,type}]}] for every loaded config
+  return Object.entries(state.configs).map(([file, cfg]) => ({
+    file,
+    raw: cfg.raw || '',
+    fields: buildFileSchema(cfg.current, []),
+  })).filter(s => s.fields.length > 0);
+}
+
+function setAgentBusy(busy) {
+  const input = document.getElementById('agent-input');
+  const btn   = document.getElementById('agent-run-btn');
+  const spin  = document.getElementById('agent-spinner');
+  if (input) input.disabled = busy;
+  if (btn)   btn.disabled   = busy;
+  if (spin)  spin.classList.toggle('hidden', !busy);
+}
+
+function updateAgentScope() {
+  const el = document.getElementById('agent-scope');
+  if (!el) return;
+  const total   = state.files.length;
+  const loaded  = Object.keys(state.configs).length;
+  const pending = total - loaded;
+  if (!total) { el.textContent = ''; return; }
+  el.textContent = pending > 0
+    ? `${loaded}/${total} files loaded`
+    : `${loaded} file${loaded > 1 ? 's' : ''} in scope`;
+}
+
+function renderAgentResponse(summary, diffs) {
+  const el = document.getElementById('agent-response');
+  if (!el) return;
+  if (!summary && !diffs) { el.classList.add('hidden'); return; }
+
+  const diffsHtml = (diffs || []).map(({ file, path, oldVal, newVal }) =>
+    `<div class="agent-diff-line">` +
+      `<span class="agent-diff-file">${escapeHtml(file)}</span>` +
+      `<span class="agent-diff-key">${escapeHtml(path.join('.'))}</span>` +
+      `<span class="agent-diff-old">${escapeHtml(String(oldVal))}</span>` +
+      `<span class="agent-diff-arrow">→</span>` +
+      `<span class="agent-diff-new">${escapeHtml(String(newVal))}</span>` +
+    `</div>`
+  ).join('');
+
+  el.innerHTML =
+    `<div class="agent-resp-header">` +
+      `<span class="agent-resp-summary">${escapeHtml(summary || '')}</span>` +
+      `<button class="agent-resp-dismiss" id="agent-resp-dismiss">&times;</button>` +
+    `</div>` +
+    (diffsHtml ? `<div class="agent-resp-diffs">${diffsHtml}</div>` : '');
+
+  el.classList.remove('hidden');
+
+  document.getElementById('agent-resp-dismiss').addEventListener('click', () => {
+    el.classList.add('hidden');
+  });
+}
+
+function _executeAgentPrompt(prompt) {
+  const schemata = buildAllSchemata();
+  if (!schemata.length) {
+    setAgentBusy(false);
+    toast('No configs loaded', 'error');
+    return;
+  }
+  vscode.postMessage({ type: 'agentPrompt', prompt, schemata });
+}
+
+function runAgentPrompt() {
+  const input  = document.getElementById('agent-input');
+  const prompt = (input ? input.value : '').trim();
+  if (!prompt) return;
+  if (!state.files.length) { toast('No config files found', 'error'); return; }
+
+  setAgentBusy(true);
+  renderAgentResponse(null, null); // clear previous response
+
+  // Load any files not yet in memory, then fire
+  const missing = state.files.filter(f => !state.configs[f]);
+  if (missing.length === 0) {
+    _executeAgentPrompt(prompt);
+    return;
+  }
+  // Store prompt and wait for loads to complete
+  state._agentPending = { prompt, awaiting: new Set(missing) };
+  for (const f of missing) vscode.postMessage({ type: 'readConfig', filename: f });
 }
 
 // ── Numeric slider helpers ──────────────────────────────────
@@ -1605,6 +1789,12 @@ document.getElementById('save-defaults-btn').addEventListener('click', saveAsUse
 document.getElementById('reset-defaults-btn').addEventListener('click', resetToFactoryDefault);
 
 document.getElementById('search').addEventListener('input', applySearch);
+
+// ── Agent CLI bar listeners ─────────────────────────────────
+document.getElementById('agent-run-btn').addEventListener('click', runAgentPrompt);
+document.getElementById('agent-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); runAgentPrompt(); }
+});
 
 // ── Keyboard shortcuts ─────────────────────────────────────
 document.addEventListener('keydown', e => {

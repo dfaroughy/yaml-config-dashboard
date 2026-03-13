@@ -156,6 +156,133 @@ function activate(context) {
             }
             break;
           }
+          case 'agentPrompt': {
+            (async () => {
+              try {
+                // ── Select model ──────────────────────────────
+                if (!vscode.lm) {
+                  panel.webview.postMessage({ type: 'agentResult', error: 'Language Model API not available. Update VS Code to 1.85+.' });
+                  return;
+                }
+                const models = await vscode.lm.selectChatModels({ vendor: 'copilot', family: 'gpt-4o' });
+                const model = models && models[0];
+                if (!model) {
+                  panel.webview.postMessage({ type: 'agentResult', error: 'No language model available. Install GitHub Copilot and sign in.' });
+                  return;
+                }
+
+                // ── Gather repo context (README + file list) ──
+                let repoContext = '';
+                const readmeCandidates = ['README.md', 'readme.md', 'README.txt', 'readme.txt'];
+                const searchDirs = [configDir, path.dirname(configDir)];
+                for (const dir of searchDirs) {
+                  for (const fname of readmeCandidates) {
+                    try {
+                      const content = fs.readFileSync(path.join(dir, fname), 'utf8');
+                      repoContext = content.slice(0, 3000); // cap at 3k chars
+                      break;
+                    } catch { /* not found */ }
+                  }
+                  if (repoContext) break;
+                }
+
+                // ── Build multi-file schema string ────────────
+                const schemata = msg.schemata; // [{file, fields:[{path,value,type}]}]
+                const schemaBlock = schemata.map(({ file, raw, fields }) => {
+                  const rawSection = raw
+                    ? `  RAW YAML:\n${raw.slice(0, 2000).split('\n').map(l => '    ' + l).join('\n')}\n`
+                    : '';
+                  const lines = fields.slice(0, 150).map(({ path, value, type }) =>
+                    `    ${JSON.stringify(path)}  =  ${JSON.stringify(value)}  (${type})`
+                  ).join('\n');
+                  return `  [${file}]\n${rawSection}  PATCHABLE FIELDS:\n${lines}`;
+                }).join('\n\n');
+
+                // ── System prompt ─────────────────────────────
+                const contextSection = repoContext
+                  ? `\nREPO CONTEXT (from README):\n${repoContext}\n`
+                  : '';
+
+                const systemPrompt =
+`You are an expert config editor for software and machine learning projects.
+${contextSection}
+CONFIG FILES IN SCOPE:
+${schemaBlock}
+
+The user will give a natural-language instruction to modify one or more config values.
+
+Return a JSON object with exactly two keys — nothing else, no markdown, no prose:
+{
+  "summary": "<one concise sentence describing what you changed and why>",
+  "patches": [
+    { "file": "<filename>", "path": ["key", "nested_key", ...], "value": <new_value> },
+    ...
+  ]
+}
+
+RULES:
+- "file" must exactly match one of the filenames listed above.
+- "path" must be a JSON array of strings copied exactly from the schema above (e.g. ["training","optimizer","lr"]). NEVER use dot notation like "training.optimizer.lr".
+- "value" must preserve the original type: number→number, boolean→boolean, string→string.
+- Apply numeric instructions precisely: "reduce by factor of 3" = divide by 3, "double" = ×2, "halve" = ÷2, "set to X" = replace with X, "increase by 10%" = multiply by 1.1.
+- If a field appears in multiple files and the user doesn't specify which, patch all of them.
+- If the instruction is ambiguous or no fields match, return an empty patches array.
+- Only include fields that actually need to change.
+- The "summary" should be human-readable and mention the field name(s) and new value(s).
+- Return ONLY the JSON object. Any other text will break the parser.`;
+
+                const messages = [
+                  vscode.LanguageModelChatMessage.User(systemPrompt),
+                  vscode.LanguageModelChatMessage.User(msg.prompt),
+                ];
+
+                // ── Stream response ───────────────────────────
+                const tokenSource = new vscode.CancellationTokenSource();
+                const response = await model.sendRequest(messages, {}, tokenSource.token);
+
+                let raw = '';
+                for await (const chunk of response.text) { raw += chunk; }
+
+                // ── Strip accidental markdown fences ─────────
+                let text = raw.trim();
+                text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+
+                // ── Parse response ────────────────────────────
+                let parsed;
+                try {
+                  parsed = JSON.parse(text);
+                  if (typeof parsed !== 'object' || parsed === null) throw new Error('Not an object');
+                  if (!Array.isArray(parsed.patches)) throw new Error('Missing patches array');
+                } catch (e) {
+                  // Fallback: maybe the model returned a bare array (old behaviour)
+                  try {
+                    const arr = JSON.parse(text);
+                    if (Array.isArray(arr)) {
+                      parsed = { summary: '', patches: arr };
+                    } else {
+                      throw new Error('Unrecognised format');
+                    }
+                  } catch {
+                    panel.webview.postMessage({
+                      type: 'agentResult',
+                      error: `Could not parse model response: ${e.message}. Raw: "${text.slice(0, 150)}"`
+                    });
+                    return;
+                  }
+                }
+
+                panel.webview.postMessage({
+                  type: 'agentResult',
+                  summary: parsed.summary || '',
+                  patches: parsed.patches,
+                });
+
+              } catch (e) {
+                panel.webview.postMessage({ type: 'agentResult', error: e.message || String(e) });
+              }
+            })();
+            break;
+          }
           case 'exportJson': {
             try {
               const filePath = path.resolve(configDir, msg.filename);

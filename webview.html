@@ -23,6 +23,14 @@
         <button class="btn-icon" id="settings-btn" title="Settings">&#9881;</button>
       </div>
     </header>
+    <div id="agent-bar">
+      <span class="agent-prompt-label">&gt;_</span>
+      <input type="text" id="agent-input" placeholder="e.g. reduce learning rate by a factor of 3" autocomplete="off" spellcheck="false">
+      <button class="btn" id="agent-run-btn">Run</button>
+      <div id="agent-spinner" class="agent-spinner hidden"></div>
+      <span id="agent-scope" class="agent-scope"></span>
+    </div>
+    <div id="agent-response" class="hidden"></div>
     <div id="pinned-bar"></div>
     <nav id="file-tabs"></nav>
   </div>
