@@ -8,21 +8,24 @@
   <link rel="stylesheet" href="{{CSS_URI}}">
 </head>
 <body>
-  <header>
-    <div class="header-left">
-      <h1>YAML Config Dashboard</h1>
-      <span class="project-badge" id="project-badge"></span>
-    </div>
-    <div class="header-right">
-      <input type="search" id="search" placeholder="Filter parameters..." autocomplete="off">
-      <span class="shortcut-hint"><kbd id="mod-key">Ctrl</kbd>+<kbd>S</kbd> save</span>
-      <button class="btn" id="reset-btn" disabled>Reset</button>
-      <button class="btn btn-primary" id="save-btn" disabled>
-        <span class="btn-save-indicator">Save</span>
-      </button>
-      <button class="btn-icon" id="settings-btn" title="Settings">&#9881;</button>
-    </div>
-  </header>
+  <div id="sticky-top">
+    <header>
+      <div class="header-left">
+        <h1>YAML Config Dashboard</h1>
+      </div>
+      <div class="header-right">
+        <input type="search" id="search" placeholder="Search..." autocomplete="off">
+        <span class="shortcut-hint"><kbd id="mod-key">Ctrl</kbd>+<kbd>S</kbd> save</span>
+        <button class="btn" id="reset-btn" disabled>Reset</button>
+        <button class="btn btn-primary" id="save-btn" disabled>
+          <span class="btn-save-indicator">Save</span>
+        </button>
+        <button class="btn-icon" id="settings-btn" title="Settings">&#9881;</button>
+      </div>
+    </header>
+    <div id="pinned-bar"></div>
+    <nav id="file-tabs"></nav>
+  </div>
 
   <div id="settings-overlay"></div>
   <div id="settings-panel">
@@ -133,10 +136,6 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
-    </div>
-
-    <div class="sp-section">
-      <div class="sp-section-title">Behavior</div>
       <div class="sp-toggle-row">
         <span class="sp-label">Auto-expand all sections</span>
         <label class="toggle">
@@ -151,23 +150,26 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
+      <div class="sp-toggle-row">
+        <span class="sp-label">Show sliders</span>
+        <label class="toggle">
+          <input type="checkbox" id="set-sliders" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
     </div>
 
     <div class="sp-section">
-      <div class="sp-section-title">Export</div>
-      <button class="sp-export-btn" id="export-cli">
-        <span class="export-icon">&#9654;</span> Copy as CLI args
+      <div class="sp-section-title">Defaults</div>
+      <button class="sp-export-btn" id="save-defaults-btn">
+        <span class="export-icon">&#9733;</span> Save as my default
       </button>
-      <button class="sp-export-btn" id="export-json">
-        <span class="export-icon">{}</span> Copy as flat JSON
-      </button>
-      <button class="sp-export-btn" id="export-env">
-        <span class="export-icon">$</span> Copy as env vars
+      <button class="sp-export-btn" id="reset-defaults-btn">
+        <span class="export-icon">&#8635;</span> Reset to factory defaults
       </button>
     </div>
-  </div>
 
-  <nav id="file-tabs"></nav>
+  </div>
 
   <main id="config-editor">
     <div class="empty-state">

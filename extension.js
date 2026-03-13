@@ -4,17 +4,11 @@ const fs = require('fs');
 const crypto = require('crypto');
 const yaml = require('./vendor/js-yaml.min.js');
 
-let currentPanel;
+const panels = new Map(); // configDir -> WebviewPanel
 
 function activate(context) {
   const cmd = vscode.commands.registerCommand('configDashboard.open', async (uri) => {
     try {
-      // ── Reveal existing panel if open ──────────────────────
-      if (currentPanel) {
-        currentPanel.reveal(vscode.ViewColumn.One);
-        return;
-      }
-
       // ── Folder picker ──────────────────────────────────────
       let configDir;
       if (uri && uri.fsPath) {
@@ -31,6 +25,12 @@ function activate(context) {
         });
         if (!folders || folders.length === 0) return;
         configDir = folders[0].fsPath;
+      }
+
+      // ── Reveal existing panel for this folder ──────────────
+      if (panels.has(configDir)) {
+        panels.get(configDir).reveal(vscode.ViewColumn.One);
+        return;
       }
 
       // ── Check folder contains YAML files ───────────────────
@@ -52,10 +52,11 @@ function activate(context) {
 
       // ── Resource URIs ──────────────────────────────────────
       const nonce = crypto.randomBytes(16).toString('hex');
+      const folderName = path.basename(configDir).replace(/ /g, '_');
 
-      currentPanel = vscode.window.createWebviewPanel(
+      const panel = vscode.window.createWebviewPanel(
         'configDashboard',
-        'Config Dashboard',
+        folderName,
         vscode.ViewColumn.One,
         {
           enableScripts: true,
@@ -67,12 +68,14 @@ function activate(context) {
         }
       );
 
-      currentPanel.onDidDispose(() => { currentPanel = undefined; }, null, context.subscriptions);
+      panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'logo_2D.png');
+      panels.set(configDir, panel);
+      panel.onDidDispose(() => { panels.delete(configDir); }, null, context.subscriptions);
 
-      const cssUri  = currentPanel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'media', 'webview.css'));
-      const yamlUri = currentPanel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'vendor', 'js-yaml.min.js'));
-      const jsUri   = currentPanel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'media', 'webview.js'));
-      const cspSource = currentPanel.webview.cspSource;
+      const cssUri  = panel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'media', 'webview.css'));
+      const yamlUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'vendor', 'js-yaml.min.js'));
+      const jsUri   = panel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'media', 'webview.js'));
+      const cspSource = panel.webview.cspSource;
 
       const htmlPath = path.join(context.extensionPath, 'webview.html');
       let html = fs.readFileSync(htmlPath, 'utf8');
@@ -82,7 +85,7 @@ function activate(context) {
         .replace('{{CSS_URI}}',  cssUri.toString())
         .replace('{{YAML_URI}}', yamlUri.toString())
         .replace('{{JS_URI}}',   jsUri.toString());
-      currentPanel.webview.html = html;
+      panel.webview.html = html;
 
       // ── Recursive YAML file discovery ──────────────────────
       function findYamlFiles(dir, base) {
@@ -104,11 +107,21 @@ function activate(context) {
       }
 
       // ── Message handler ────────────────────────────────────
-      currentPanel.webview.onDidReceiveMessage(async (msg) => {
+      panel.webview.onDidReceiveMessage(async (msg) => {
         switch (msg.type) {
           case 'init': {
             const files = findYamlFiles(configDir, configDir);
-            currentPanel.webview.postMessage({ type: 'init', files, configDir });
+            const userDefaultSettings = context.globalState.get('userDefaultSettings', null);
+            const pinnedFields = context.globalState.get('pinnedFields', {});
+            panel.webview.postMessage({ type: 'init', files, configDir, userDefaultSettings, pinnedFields });
+            break;
+          }
+          case 'saveUserDefaults': {
+            context.globalState.update('userDefaultSettings', msg.settings);
+            break;
+          }
+          case 'savePinned': {
+            context.globalState.update('pinnedFields', msg.pinned);
             break;
           }
           case 'readConfig': {
@@ -116,14 +129,14 @@ function activate(context) {
               const filePath = path.resolve(configDir, msg.filename);
               const safeBase = path.resolve(configDir) + path.sep;
               if (!filePath.startsWith(safeBase)) {
-                currentPanel.webview.postMessage({ type: 'configData', error: 'Invalid path' });
+                panel.webview.postMessage({ type: 'configData', error: 'Invalid path' });
                 return;
               }
               const raw    = fs.readFileSync(filePath, 'utf8');
               const parsed = yaml.load(raw);
-              currentPanel.webview.postMessage({ type: 'configData', filename: msg.filename, raw, parsed });
+              panel.webview.postMessage({ type: 'configData', filename: msg.filename, raw, parsed });
             } catch (e) {
-              currentPanel.webview.postMessage({ type: 'configData', error: e.message });
+              panel.webview.postMessage({ type: 'configData', error: e.message });
             }
             break;
           }
@@ -132,14 +145,31 @@ function activate(context) {
               const filePath = path.resolve(configDir, msg.filename);
               const safeBase = path.resolve(configDir) + path.sep;
               if (!filePath.startsWith(safeBase)) {
-                currentPanel.webview.postMessage({ type: 'writeResult', error: 'Invalid path' });
+                panel.webview.postMessage({ type: 'writeResult', error: 'Invalid path' });
                 return;
               }
               const output = yaml.dump(msg.data, { flowLevel: -1, sortKeys: false });
               fs.writeFileSync(filePath, output, 'utf8');
-              currentPanel.webview.postMessage({ type: 'writeResult', success: true, filename: msg.filename });
+              panel.webview.postMessage({ type: 'writeResult', success: true, filename: msg.filename });
             } catch (e) {
-              currentPanel.webview.postMessage({ type: 'writeResult', error: e.message });
+              panel.webview.postMessage({ type: 'writeResult', error: e.message });
+            }
+            break;
+          }
+          case 'exportJson': {
+            try {
+              const filePath = path.resolve(configDir, msg.filename);
+              const safeBase = path.resolve(configDir) + path.sep;
+              if (!filePath.startsWith(safeBase)) {
+                panel.webview.postMessage({ type: 'exportJsonResult', error: 'Invalid path' });
+                return;
+              }
+              const jsonFilename = msg.filename.replace(/\.ya?ml$/i, '.json');
+              const jsonPath = path.resolve(configDir, jsonFilename);
+              fs.writeFileSync(jsonPath, JSON.stringify(msg.data, null, 2), 'utf8');
+              panel.webview.postMessage({ type: 'exportJsonResult', success: true, jsonFilename });
+            } catch (e) {
+              panel.webview.postMessage({ type: 'exportJsonResult', error: e.message });
             }
             break;
           }

@@ -2,7 +2,7 @@
   "name": "yaml-config-dashboard",
   "displayName": "YAML Config Dashboard",
   "description": "Visual editor for YAML configuration files — browse, edit, and export config params without writing YAML by hand.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "dfaroughy",
   "license": "MIT",
   "engines": { "vscode": "^1.80.0" },
