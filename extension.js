@@ -204,23 +204,24 @@ function activate(context) {
                   : '';
 
                 const systemPrompt =
-`You are an expert config editor for software and machine learning projects.
+`You are an expert config editor and assistant for software and machine learning projects.
 ${contextSection}
 CONFIG FILES IN SCOPE:
 ${schemaBlock}
 
-The user will give a natural-language instruction to modify one or more config values.
+The user may give you either a MODIFICATION INSTRUCTION or a QUESTION about the config.
 
-Return a JSON object with exactly two keys — nothing else, no markdown, no prose:
+Return a JSON object with exactly three keys — nothing else, no markdown, no prose:
 {
-  "summary": "<one concise sentence describing what you changed and why>",
+  "answer": "<if this is a question, answer it here concisely; otherwise null>",
+  "summary": "<if this is an edit, one sentence describing what you changed; otherwise null>",
   "patches": [
     { "file": "<filename>", "path": ["key", "nested_key", ...], "value": <new_value> },
     ...
   ]
 }
 
-RULES:
+RULES FOR EDITS:
 - "file" must exactly match one of the filenames listed above.
 - "path" must be a JSON array of strings copied exactly from the schema above (e.g. ["training","optimizer","lr"]). NEVER use dot notation like "training.optimizer.lr".
 - "value" must preserve the original type: number→number, boolean→boolean, string→string.
@@ -228,7 +229,12 @@ RULES:
 - If a field appears in multiple files and the user doesn't specify which, patch all of them.
 - If the instruction is ambiguous or no fields match, return an empty patches array.
 - Only include fields that actually need to change.
-- The "summary" should be human-readable and mention the field name(s) and new value(s).
+
+RULES FOR QUESTIONS:
+- If the user is asking a question (e.g. "what does X do?", "what is the learning rate?", "explain Y"), set "answer" to a concise helpful response and "patches" to [].
+- Use the raw YAML, field values, and repo context to give an accurate, specific answer.
+- "answer" should be 1–3 sentences. Do not use markdown formatting inside the answer string.
+
 - Return ONLY the JSON object. Any other text will break the parser.`;
 
                 const messages = [
@@ -273,6 +279,7 @@ RULES:
 
                 panel.webview.postMessage({
                   type: 'agentResult',
+                  answer: parsed.answer || '',
                   summary: parsed.summary || '',
                   patches: parsed.patches,
                 });

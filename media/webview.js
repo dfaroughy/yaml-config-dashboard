@@ -471,7 +471,12 @@ window.addEventListener('message', event => {
       setAgentBusy(false);
       if (msg.error) {
         toast('Agent: ' + msg.error, 'error');
-        renderAgentResponse('Error: ' + msg.error, null);
+        renderAgentResponse('Error: ' + msg.error, null, false);
+        break;
+      }
+      // Q&A mode — answer present, no patches to apply
+      if (msg.answer) {
+        renderAgentResponse(msg.answer, null, true);
         break;
       }
       if (!msg.patches || !Array.isArray(msg.patches)) {
@@ -479,7 +484,7 @@ window.addEventListener('message', event => {
         break;
       }
       if (msg.patches.length === 0) {
-        renderAgentResponse(msg.summary || 'No changes needed.', []);
+        renderAgentResponse(msg.summary || 'No changes needed.', [], false);
         toast('Agent made no changes', 'info');
         break;
       }
@@ -521,13 +526,13 @@ window.addEventListener('message', event => {
 
       if (applied === 0) {
         toast(`Agent: no valid fields matched${skipped ? ` (${skipped} skipped)` : ''}`, 'error');
-        renderAgentResponse(msg.summary || 'No matching fields found.', []);
+        renderAgentResponse(msg.summary || 'No matching fields found.', [], false);
       } else {
         const skipNote = skipped ? `, ${skipped} skipped` : '';
         toast(`Agent: ${applied} change${applied > 1 ? 's' : ''} across ${affectedFiles.size} file${affectedFiles.size > 1 ? 's' : ''}${skipNote}`, 'success');
         const input = document.getElementById('agent-input');
         if (input) input.value = '';
-        renderAgentResponse(msg.summary || `Applied ${applied} change${applied > 1 ? 's' : ''}.`, diffs);
+        renderAgentResponse(msg.summary || `Applied ${applied} change${applied > 1 ? 's' : ''}.`, diffs, false);
       }
       renderEditor();
       renderPinnedBar();
@@ -614,6 +619,7 @@ function renderEditor() {
   }
   renderPinnedBar();
   applySectionHeights();
+  refreshSectionDeepButtons();
   applySearch();
 }
 
@@ -687,8 +693,7 @@ function renderObjectNode(obj, original, path) {
     if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
       const childCount = Object.keys(val).length;
       const dispKey = escapeHtml(String(key));
-      const hasNested = Object.values(val).some(v => v !== null && typeof v === 'object');
-      const collapseBtn = hasNested ? `<button class="section-collapse-btn" data-action="toggle-subsections"><span class="scb-minus">[-]</span><span class="scb-plus">[+]</span></button>` : '';
+      const collapseBtn = (path.length === 0) ? `<button class="section-collapse-btn" data-action="toggle-section-deep">[+]</button>` : '';
       html += `<div class="section collapsed">
         <div class="section-header" data-action="toggle-section">
           <span class="chevron">&#9654;</span>
@@ -700,12 +705,13 @@ function renderObjectNode(obj, original, path) {
       </div>`;
     } else if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object' && val[0] !== null) {
       const dispKey = escapeHtml(String(key));
+      const collapseBtn = (path.length === 0) ? `<button class="section-collapse-btn" data-action="toggle-section-deep">[+]</button>` : '';
       html += `<div class="section collapsed">
         <div class="section-header" data-action="toggle-section">
           <span class="chevron">&#9654;</span>
           <span class="section-name">${dispKey}</span>
           <span class="section-count">${val.length} items</span>
-          <button class="section-collapse-btn" data-action="toggle-subsections"><span class="scb-minus">[-]</span><span class="scb-plus">[+]</span></button>
+          ${collapseBtn}
         </div>
         <div class="section-body">${renderObjectArray(childPath, val, orig)}</div>
       </div>`;
@@ -728,7 +734,6 @@ function renderObjectArray(path, arr, origArr) {
         <span class="chevron">&#9654;</span>
         <span class="section-name">${label}</span>
         <span class="section-count">${childCount}</span>
-        <button class="section-collapse-btn" data-action="toggle-subsections"><span class="scb-minus">[-]</span><span class="scb-plus">[+]</span></button>
       </div>
       <div class="section-body">${renderObjectNode(item, origItem, [...path, i])}</div>
     </div>`;
@@ -1072,7 +1077,7 @@ function updateAgentScope() {
     : `${loaded} file${loaded > 1 ? 's' : ''} in scope`;
 }
 
-function renderAgentResponse(summary, diffs) {
+function renderAgentResponse(summary, diffs, isAnswer) {
   const el = document.getElementById('agent-response');
   if (!el) return;
   if (!summary && !diffs) { el.classList.add('hidden'); return; }
@@ -1088,7 +1093,8 @@ function renderAgentResponse(summary, diffs) {
   ).join('');
 
   el.innerHTML =
-    `<div class="agent-resp-header">` +
+    `<div class="agent-resp-header${isAnswer ? ' agent-resp-header--answer' : ''}">` +
+      (isAnswer ? `<span class="agent-resp-icon">&#10095;</span>` : '') +
       `<span class="agent-resp-summary">${escapeHtml(summary || '')}</span>` +
       `<button class="agent-resp-dismiss" id="agent-resp-dismiss">&times;</button>` +
     `</div>` +
@@ -1494,18 +1500,26 @@ function toggleSection(sectionEl) {
   }
 }
 
-function toggleSubsections(sectionEl) {
+function toggleSectionDeep(sectionEl) {
   const body = sectionEl.querySelector(':scope > .section-body');
   if (!body) return;
-  const children = Array.from(body.querySelectorAll(':scope > .section'));
-  if (!children.length) return;
-  const anyExpanded = children.some(s => !s.classList.contains('collapsed'));
-  children.forEach(s => {
-    s.classList.toggle('collapsed', anyExpanded);
-    const b = s.querySelector(':scope > .section-body');
-    if (b) b.style.maxHeight = anyExpanded ? '0' : 'none';
+  const nested = Array.from(body.querySelectorAll('.section'));
+  if (!nested.length) return;
+  const anyExpanded = nested.some(s => !s.classList.contains('collapsed'));
+  nested.forEach(s => s.classList.toggle('collapsed', anyExpanded));
+  const btn = sectionEl.querySelector(':scope > .section-header > .section-collapse-btn');
+  if (btn) btn.textContent = anyExpanded ? '[+]' : '[-]';
+  applySectionHeights();
+}
+
+function refreshSectionDeepButtons() {
+  document.querySelectorAll('#config-editor > .section').forEach(sectionEl => {
+    const btn = sectionEl.querySelector(':scope > .section-header > .section-collapse-btn');
+    if (!btn) return;
+    const nested = sectionEl.querySelectorAll('.section');
+    const anyExpanded = nested.length > 0 && Array.from(nested).some(s => !s.classList.contains('collapsed'));
+    btn.textContent = anyExpanded ? '[-]' : '[+]';
   });
-  sectionEl.classList.toggle('subsecs-hidden', anyExpanded);
 }
 
 function applySectionHeights() {
@@ -1596,8 +1610,8 @@ document.getElementById('config-editor').addEventListener('click', e => {
   if (!target) return;
   const { action, fid, index } = target.dataset;
   switch (action) {
-    case 'toggle-section':      toggleSection(target.closest('.section')); break;
-    case 'toggle-subsections':  toggleSubsections(target.closest('.section')); break;
+    case 'toggle-section':       toggleSection(target.closest('.section')); break;
+    case 'toggle-section-deep':  toggleSectionDeep(target.closest('.section')); break;
     case 'convert-null':     convertNull(fid); break;
     case 'remove-item':      removeArrayItem(fid, Number(index)); break;
     case 'add-item':         addArrayItem(fid); break;
