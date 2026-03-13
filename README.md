@@ -10,8 +10,19 @@ It renders a tabbed, hierarchical form with type-aware controls for every parame
 
 ## Features
 
+### Agentic CLI (Copilot-powered)
+
+- **Natural-language config editing** — type a plain-English instruction in the prompt bar (e.g. *"reduce learning rate by half"*) and Copilot patches matching fields across all loaded files. Changes appear as orange diff highlights; save or reset as usual.
+- **Q&A mode** — ask questions about your config data (e.g. *"what does sample_source control?"*) and get answers directly in the dashboard without modifying any files.
+- **Multi-file scope** — the agent pre-loads every YAML file in the folder, so it can reason about and edit multiple configs in one prompt.
+- **Repo-aware context** — the agent reads your `README.md` and the raw YAML of each file for accurate understanding of deeply nested configs.
+- Requires **GitHub Copilot** extension and VS Code **1.85+**.
+
+### Visual editor
+
 - **Multi-file tabs** — open an entire folder and switch between files in one click
-- **Hierarchical sections** — nested objects are rendered as collapsible sections
+- **Hierarchical sections** — nested objects are rendered as collapsible sections with per-section expand/collapse buttons on top-level groups
+- **Inline pinning** — hover any field to reveal a pin icon; pinned fields stay visible in a dedicated bar above the editor for quick access
 - **Type-aware controls**
   - Strings and numbers → text inputs
   - Booleans → toggle switches
@@ -112,8 +123,9 @@ TRAINING__EPOCHS=100
 
 ## Requirements
 
-- Visual Studio Code **1.80.0** or later
+- Visual Studio Code **1.85.0** or later
 - YAML files must use `.yaml` or `.yml` extension
+- **Agentic CLI** requires the [GitHub Copilot](https://marketplace.visualstudio.com/items?itemName=GitHub.copilot) extension
 
 ---
 
