@@ -3,4 +3,4 @@ node_modules/
 *.map
 js-yaml.min.js
 .DS_Store
-AGENT_CLI_PLAN.md
+AGENT_PLAN.md
