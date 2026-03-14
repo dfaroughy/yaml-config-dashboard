@@ -11,15 +11,14 @@ Designed for ML experiment configs, but works with any YAML.
 ## Agentic CLI
 
 - **Natural-language editing** — type an instruction in the prompt bar (e.g. *"reduce learning rate by half"*, *"lock all data fields"*) and the agent patches, locks, pins, or reclassifies fields across all loaded files.
-- **Q&A mode** — ask questions about your configs and get answers directly in the dashboard.
-- **Streaming chat log** — answers type out with a blinking cursor; up to 5 previous exchanges shown with an opacity gradient.
+- **Q&A mode** — ask questions about your configs/data files and get answers directly in the dashboard.
 - **Multi-model support** — works with any VS Code LM extension (GitHub Copilot, OpenAI Codex, etc.). Pick your model from the dropdown.
 - **Auto-scaling context** — the amount of YAML data sent to the agent scales based on the selected model's context window.
 - **Customizable system prompt** — add extra instructions via the "Additional Instructions" panel; the built-in prompt stays hidden.
 
 ## Smart File Handling
 
-- **Auto-classification** — YAML files are automatically classified as *config* or *data* using the LM on startup.
+- **Agentic auto-classification** — YAML files are automatically classified as *config* or *data* using the LM on startup.
 - **Three-panel layout** — separate collapsible panels for Pinned fields, Configs, and Data files.
 - **Lock/unlock** — per-field lock buttons; data files are auto-locked by default. The agent can also lock/unlock via natural language.
 
